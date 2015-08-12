@@ -1,5 +1,22 @@
-// memoize.cpp : Defines the entry point for the console application.
-//
+// TODO
+// - Support function call expressions
+// - Optimize caching and evaluation algorithm for cases where all the 
+//   children of a parent have the same set of inputs.  In this case, the 
+//   children don't need to be cached because it will never be used.  This is 
+//   because any change in a child causes all children to be re-evaluated.
+// - Decide whether to keep the lambda method of storing the expression object,
+//   or choose some other option:
+//    - Give memoize<> template a non-template virtual interface.  Similar 
+//      runtime overhead as now (only one late-bound function call per 
+//      top-level expression evaluation), but maybe more memory for virtual 
+//      function table?
+//    - Use a non-template cache data structure that can be generated from an 
+//      expression object.  Compiler maybe can't optimize this as much.
+//    - Find some way to avoid type-erasure when storing the expression object.
+//      This seems to require de-coupling the input from the expression in 
+//      order to use decltype() when declaring class members.  This is not 
+//      good, because it requires an extra step to bind the input data to the 
+//      rendering expression.
 
 #include "stdafx.h"
 
