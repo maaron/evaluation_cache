@@ -34,8 +34,6 @@ namespace memoize
     template <typename Expr> struct memoize;
     struct eval_cache_context;
 
-template <typename Expr> struct memoize;
-
     // This is a wrapper class that allows a some object to be used as input to a 
     // memoized expression.  The type T must be DefaultConstructible, 
     // EqualityComparable and Copyable.  Use in() for convenience.
