@@ -28,30 +28,41 @@ namespace proto = boost::proto;
 namespace mpl = boost::mpl;
 namespace fusion = boost::fusion;
 
+namespace memoize
+{
+
+    template <typename Expr> struct memoize;
+    struct eval_cache_context;
+
 template <typename Expr> struct memoize;
 
-typedef int cached_result;
-
-// This is a wrapper class that allows a some object to be used as input to a 
-// memoized expression.  The type T must be DefaultConstructible, 
-// EqualityComparable and Copyable.  Use in() for convenience.
-template <typename T>
-struct input
-{
+    // This is a wrapper class that allows a some object to be used as input to a 
+    // memoized expression.  The type T must be DefaultConstructible, 
+    // EqualityComparable and Copyable.  Use in() for convenience.
+    template <typename T>
+    struct input
+    {
 	T& src;
 	mutable T cache;
 
 	input(T& source) : src(source), cache()
 	{
 	}
-};
+    };
 
-template <typename T>
-input<T> in(T& t) { return input<T>(t); }
+    template <typename T>
+    std::ostream& operator<<(std::ostream& s, const input<T>& i)
+    {
+        s << "input";
+        return s;
+    }
 
-struct memoize_domain
+    template <typename T>
+    input<T> in(T& t) { return input<T>(t); }
+
+    struct memoize_domain
 	: proto::domain < proto::generator<memoize> >
-{
+    {
 	// The memoize domain customizes as_child so that expressions are held by 
 	// value.  This allows expression objects to be passed around or stored as
 	// class member data.
@@ -60,71 +71,38 @@ struct memoize_domain
 		: proto_base_domain::as_expr<T>
 	{
 	};
-#if 0
-	template <typename T>
-	struct as_child< input<T> >
-		: proto_base_domain::as_child<input<T> >
-	{
 	};
 
-	template <typename T>
-	struct as_child<input<T> const>
-		: proto_base_domain::as_child<input<T> const>
-	{
-	};
-#endif
-};
-
-template <typename Expr>
-struct memoize
+    template <typename Expr>
+    struct memoize
 	: proto::extends < Expr, memoize<Expr>, memoize_domain >
-{
+    {
 	typedef proto::extends<Expr, memoize<Expr>, memoize_domain> base_type;
+        typedef typename proto::result_of::eval<memoize<Expr>, eval_cache_context const>::type cache_type;
 
 	memoize(Expr const& expr = Expr()) : base_type(expr), dirty(true) {}
 
-	mutable cached_result result;
+        mutable cache_type result;
 
 	// Fix me: This flag is only meaningful for non-terminals. Terminal 
 	// dirtiness is determined by operator== on the source data.  I think a 
 	// custom generator could be used to provide an alternate memoize 
 	// implementation for terminals.
 	mutable bool dirty;
-};
+    };
 
-template <typename T>
-struct is_terminal : mpl::false_ {};
+    template <typename T>
+    struct is_terminal : mpl::false_ {};
 
-template <typename T>
-struct is_terminal<input<T> > : mpl::true_{};
+    template <typename T>
+    struct is_terminal<input<T> > : mpl::true_{};
 
-BOOST_PROTO_DEFINE_OPERATORS(is_terminal, memoize_domain);
+    BOOST_PROTO_DEFINE_OPERATORS(is_terminal, memoize_domain);
 
-// This callable context evaluates whether an expression is dirty by looking 
-// for the first input terminal whose dirty flag is set.
-struct is_dirty_context
-	: proto::callable_context < is_dirty_context const >
-{
-	typedef bool result_type;
-
-	template <typename Expr>
-	result_type operator()(proto::tag::terminal, Expr const& expr) const
+    // This context marks dirty all sub-expressions who depend on terminals 
+    // that are dirty.
+    struct mark_dirty_context
 	{
-		return expr.dirty;
-	}
-
-	template <typename Tag, typename E1, typename E2>
-	result_type operator()(Tag, E1 const& e1, E2 const& e2) const
-	{
-		return proto::eval(e1, *this) ||
-			proto::eval(e2, *this);
-	}
-};
-
-// This context locates all sub-expressions that are dependent on terminals 
-// that are dirty, and marks them as dirty.
-struct mark_dirty_context
-{
 	template <
 		typename Expr,
 		typename Tag = typename proto::tag_of<Expr>::type>
@@ -158,37 +136,42 @@ struct mark_dirty_context
 			return e.dirty = !(value.cache == value.src);
 		}
 	};
-};
+    };
 
-// This context evalutes an expression by re-evaluating any sub-expressions 
-// that are dirty, and returning the cached result.
-struct eval_cache_context
-{
+    // This context evalutes an expression by re-evaluating any sub-expressions 
+    // that are dirty, and returning the cached result.
+    struct eval_cache_context
+    {
 	template <
 		typename Expr, 
 		typename Tag = typename proto::tag_of<Expr>::type>
 	struct eval
 		: proto::default_eval<Expr, eval_cache_context const>
 	{
-		typedef cached_result result_type;
+            typedef proto::default_eval<Expr, eval_cache_context const> base_type;
 
-		result_type operator()(Expr& e, eval_cache_context const& ctx)
+            typename base_type::result_type operator()(Expr& e, eval_cache_context const& ctx)
 		{
 			if (e.dirty)
 			{
-				e.result = proto::default_eval<Expr, eval_cache_context const>::operator()(e, ctx);
+                    e.result = base_type::operator()(e, ctx);
 				e.dirty = false;
 			}
 			return e.result;
 		}
 	};
 
-	template <typename Expr>
-	struct eval < Expr, proto::tag::terminal >
-	{
-		typedef cached_result result_type;
+        template <
+            typename Expr, 
+            typename Value = typename proto::result_of::value<Expr>::type>
+        struct eval_terminal;
 
-		result_type operator()(Expr& e, eval_cache_context const&)
+        template <typename Expr, typename T>
+        struct eval_terminal<Expr, input<T> >
+	{
+            typedef T result_type;
+
+            result_type& operator()(Expr& e, eval_cache_context const&)
 		{
 			auto& value = proto::value(e);
 			value.cache = value.src;
@@ -196,22 +179,30 @@ struct eval_cache_context
 			return value.cache;
 		}
 	};
-};
 
-template <typename Expr>
-cached_result reevaluate(memoize<Expr> const& e)
-{
+        template <typename Expr>
+        struct eval <Expr, proto::tag::terminal>
+            : eval_terminal<Expr>
+        {
+        };
+    };
+
+    template <typename Expr>
+    typename proto::result_of::eval<Expr, eval_cache_context const>::type 
+        reevaluate(memoize<Expr> const& e)
+    {
 	proto::eval(e, mark_dirty_context());
     return proto::eval(e, eval_cache_context());
-}
+    }
 
-struct renderer
-{
+    struct renderer
+    {
 	std::function<void()> _f;
 
 	template <typename Expr>
 	renderer& operator=(Expr& e)
 	{
+            proto::display_expr(e);
 		_f = [=]() { reevaluate(e); };
 		return *this;
 	}
@@ -220,10 +211,10 @@ struct renderer
 	{
 		if (_f) _f();
 	}
-};
+    };
 
-struct ui_element
-{
+    struct ui_element
+    {
 	int i1, i2, i3;
 	renderer _renderer;
 
@@ -236,11 +227,16 @@ struct ui_element
 	}
 
 	void render() { _renderer(); }
-};
+    };
+}
 
 int _tmain(int argc, _TCHAR* argv[])
 {
-	ui_element e;
+    int a, b, c;
+
+    proto::display_expr(proto::as_expr(memoize::in(a))(1));
+
+	memoize::ui_element e;
 	
 	e.render();
 	e.render();
