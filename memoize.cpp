@@ -30,14 +30,6 @@ namespace fusion = boost::fusion;
 
 template <typename Expr> struct memoize;
 
-// This is similar to the target that will be passed around in UI rendering code.
-struct target
-{
-	int x, y, width, height;
-
-	target() : x(0), y(0), width(0), height(0) {}
-};
-
 typedef int cached_result;
 
 // This is a wrapper class that allows a some object to be used as input to a 
